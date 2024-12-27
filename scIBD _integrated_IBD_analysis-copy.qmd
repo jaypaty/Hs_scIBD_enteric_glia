@@ -36,10 +36,6 @@ Here, I will import the integrated RDS object into R and will add the metadata w
 library(Seurat)
 library(SeuratObject)
 library(sp)
-library(SeuratData)
-library(ggplot2)
-library(tidyverse)
-
 
 
 extrafont::loadfonts(quiet = T) #important line to allow PDF font rendering
@@ -50,6 +46,9 @@ extrafont::loadfonts(quiet = T) #important line to allow PDF font rendering
 scIBD_data_link <- "https://figshare.com/ndownloader/files/39703201?private_link=e8ebff28e5cd2a5ce6b4" # the figshare URL where the RDS matrix is available
 
 scIBD <- readRDS(url(scIBD_data_link))
+
+# scIBD local data load
+scIBD <- readRDS(file = "../scIBD_integrated_all/scIBD.gex_matrix.rds")
 
 # Set minor_cluster as the active identity
 # ------------
