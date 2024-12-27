@@ -47,9 +47,6 @@ scIBD_data_link <- "https://figshare.com/ndownloader/files/39703201?private_link
 
 scIBD <- readRDS(url(scIBD_data_link))
 
-# scIBD local data load
-scIBD <- readRDS(file = "../scIBD_integrated_all/scIBD.gex_matrix.rds")
-
 # Set minor_cluster as the active identity
 # ------------
 Idents(scIBD) <- "minor_cluster"
