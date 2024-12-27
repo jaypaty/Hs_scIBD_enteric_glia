@@ -1,0 +1,238 @@
+---
+title: "scRNA-Seq analysis from integrated scIBD human datasets "
+format: 
+  html: 
+    default:
+      body-width: 1400px
+    code-fold: TRUE
+date: last-modified
+toc: true
+df-print: paged
+author: "Jay V. Patankar"
+editor: visual
+echo: fenced
+editor_options: 
+  chunk_output_type: console
+bibliography: references.bib
+---
+
+## Analysis of human IBD scRNA integrated
+
+The following code outlines the analysis done on the integrated scIBD datasets. These datasets have been integrated into a single integrated object available from [scibd.cn](scibd.cn) [@Nie2023]. The data are an integration of multiple publicly available single cell RNA seq studies from human IBD samples.
+
+### Load in the data and the metadata
+
+Here, I will import the integrated RDS object into R and will add the metadata with detailed annotations to the object
+
+```{r "Loading the scIBD integrated data"}
+#| code-fold: TRUE
+#| warning: false
+#| title: "Loading in the scIBD integrated dataset"
+#| fig-cap: "Clustering the integrated scIBD dataset"
+#| fig-width: 14
+#| fig-height: 14
+
+# load the libraries
+library(Seurat)
+library(SeuratObject)
+library(sp)
+library(SeuratData)
+library(ggplot2)
+library(tidyverse)
+
+
+
+extrafont::loadfonts(quiet = T) #important line to allow PDF font rendering
+
+
+# Download and Load the RDS object from scibd.cn 
+# ------------
+scIBD_data_link <- "https://figshare.com/ndownloader/files/39703201?private_link=e8ebff28e5cd2a5ce6b4" # the figshare URL where the RDS matrix is available
+
+scIBD <- readRDS(url(scIBD_data_link))
+
+# Set minor_cluster as the active identity
+# ------------
+Idents(scIBD) <- "minor_cluster"
+
+# Add in the UMAP coordinates stored in the metadata as UMAP_1 and UMAP_2
+# ------------
+scIBD[['umap']] <- CreateDimReducObject(embeddings = as.matrix(scIBD@meta.data[, c('gUMAP_1', 'gUMAP_2')]), key = "UMAP_")
+
+# Assuming the t-SNE coordinates are stored in the metadata as TSNE_1 and TSNE_2
+# ------------
+scIBD[['tsne']] <- CreateDimReducObject(embeddings = as.matrix(scIBD@meta.data[, c('gTSNE_1', 'gTSNE_2')]), key = "tSNE_")
+
+
+# Look at the Dim.red. plots of the object
+# ------------
+p1 <- DimPlot(scIBD, label = TRUE, reduction = "tsne" , label.size = 6.5) + NoLegend()
+p1
+
+
+adult_glia_markers <- FindMarkers(scIBD, ident.1 = "Adult glia")
+top_50_glia_enriched <- adult_glia_markers %>% dplyr::arrange(desc()) %>% head(n = 50)
+
+write.csv(top_50_glia_enriched, file = "scIBD_top50_glia.csv")
+
+
+
+```
+
+### Adult EGCs from the integrated scIBD
+
+```{r "Subsetting neuronal to EGC clusters"}
+#| code-fold: TRUE
+#| warning: false
+#| title: "Adult EGC clusters -  scIBD integrated dataset"
+#| fig-cap: "Adult EGCs subset and expression of canonical EGC signature genes"
+#| fig-width: 14
+#| fig-height: 8
+
+
+extrafont::loadfonts(quiet = T) #important line to allow PDF font rendering
+
+# Now subset to adult EGC for further analysis
+# ------------
+scIBD_aEGC <- subset(x = scIBD, idents = "Adult glia")
+
+
+# The dataset contains samples from a study with label colitis inflamed which will not be analysed due to incomplete metadata. For this, create custom metadata column that excludes Colitis_inflamed as a disease subset
+scIBD_aEGC@meta.data$IBD <- scIBD_aEGC@meta.data$disease
+scIBD_aEGC@meta.data$IBD[scIBD_aEGC@meta.data$disease == "Colitis_inflamed"] <- NA
+scIBD_aEGC_filtered <- scIBD_aEGC[, !is.na(scIBD_aEGC@meta.data$IBD)]
+
+
+```
+
+### Subset the object by disease
+
+```{r "Subsetting by disease"}
+#| code-fold: TRUE
+#| warning: false
+#| title: "Adult EGC clusters - scIBD integrated dataset"
+#| fig-cap: "UC EGCs and expression of key signature genes"
+#| fig-width: 14
+#| fig-height: 14
+
+
+extrafont::loadfonts(quiet = T) #important line to allow PDF font rendering
+
+
+# Lets reset the Idents to the disease levels from the newly defined IBD column to then display Vlnplots 
+# ------------
+scIBD_aEGC_filtered <- SetIdent(scIBD_aEGC_filtered, value = "IBD")
+
+```
+
+### Add cell death mean expression - scIBD
+
+Now adding mean cell death pathway genes to the metadata
+
+```{r "Adding mean cell death expression to the object"}
+#| code-fold: TRUE
+#| warning: false
+#| title: "EGC subsets from IBD and cell death expression"
+#| fig-cap: "Mean cell death expression on EGC clusters"
+#| fig-width: 14
+#| fig-height: 6
+
+extrafont::loadfonts(quiet = T) #important line to allow PDF font rendering
+
+# Now adding mean expression of the Apoptosis genes from Kegg2021Human from MsigDB
+# --------
+cell_death_combined_Hs <- read.csv(file = "./cell_death_combined_Hs_scIBD.csv")
+cell_death_combined_Hs <- c(cell_death_combined_Hs$Genes)
+
+# Check if the genes are present in the sorted EGC seurat object
+# --------
+present_genes <- cell_death_combined_Hs[cell_death_combined_Hs %in% rownames(scIBD_aEGC_filtered)]
+missing_genes <- cell_death_combined_Hs[!cell_death_combined_Hs %in% rownames(scIBD_aEGC_filtered)]
+
+# Display missing genes if any
+# --------
+if (length(missing_genes) > 0) {
+  print(paste("Missing genes:", paste(missing_genes, collapse = ", ")))
+}
+
+# Get the expression data for the present genes
+# --------
+expression_data <- FetchData(scIBD_aEGC_filtered, vars = present_genes)
+
+# Calculate the mean expression for each cell
+# --------
+mean_expression <- rowMeans(expression_data, na.rm = TRUE)
+
+# Add the mean expression as a new metadata column to the sorted EGC seurat 
+# --------
+scIBD_aEGC_filtered <- AddMetaData(scIBD_aEGC_filtered, metadata = mean_expression, col.name = "mean_cell_death_pathway")
+
+# Verify the new metadata column
+# --------
+head(scIBD_aEGC_filtered@meta.data)
+
+# Plot Ridgeplots for mean cell death pathway genes on the sorted EGC seurat
+RidgePlot(scIBD_aEGC_filtered, features = "mean_cell_death_pathway",
+          sort = F, cols = c("antiquewhite", "cyan4","firebrick4"), idents = c("Healthy", "UC_non_inflamed", "UC_inflamed"))
+
+
+# Also a violin plot for the same set of genes can now be plotted
+# --------
+VlnPlot(scIBD_aEGC_filtered, features = "mean_cell_death_pathway", pt.size = 1.8,
+        split.by = "IBD", split.plot = F, combine = T, cols = c("cyan4", "antiquewhite", "firebrick4"), idents = c("Healthy", "UC_non_inflamed", "UC_inflamed"), group.by = "IBD")
+
+
+# create a subset for just the UC and healthy samples
+scIBD_aEGC_filtered_plot <- subset(x = scIBD_aEGC_filtered, idents = c(c("Healthy", "UC_non_inflamed", "UC_inflamed")))
+
+
+
+# And a Feature plot for the coexpression of mean cell death and PLP1 / CXCL9
+# --------
+FeaturePlot(scIBD_aEGC_filtered_plot, label = F, reduction = "umap", features = c("mean_cell_death_pathway", "PLP1"), pt.size = 1.0, blend = TRUE)
+
+FeaturePlot(scIBD_aEGC_filtered_plot, label = F, reduction = "umap", features = c("mean_cell_death_pathway", "CXCL9"), pt.size = 1.0, blend = TRUE)
+
+# Plot cell death PLP1/ CXCL9 split by study
+FeaturePlot(scIBD_aEGC_filtered_plot, label = F, reduction = "umap", split.by = "study", features = c("mean_cell_death_pathway", "PLP1"), pt.size = 1.0)
+
+FeaturePlot(scIBD_aEGC_filtered_plot, label = F, reduction = "umap", split.by = "study", features = c("mean_cell_death_pathway", "CXCL9"), pt.size = 1.0)
+
+
+# Plot the adult EGC clusters by disease category and by study
+DimPlot(scIBD_aEGC_filtered_plot, label = F, group.by = "disease",
+        cols = c("grey", "#7F0077", "#FF8000" ), pt.size = 1.5)
+
+
+DimPlot(scIBD_aEGC_filtered_plot, label = F, group.by = "disease", split.by = "study",
+        cols = c("grey", "#7F0077", "#FF8000" ), pt.size = 1.5)
+
+
+```
+
+### Export list of dependent packages
+
+```{r "generating requirements.txt"}
+#| results: asis
+
+# Collect session information
+session_info <- capture.output(sessionInfo())
+
+# Get installed package details
+# installed_packages <- as.data.frame(installed.packages()[, c("Package", "Version")])
+
+# Set the file path for the requirements.txt file
+requirements_file <- "requirements.txt"
+
+# Write R version and package information to the requirements.txt file
+cat(paste("R version", R.version$version.string), file = requirements_file, sep = "\n")
+cat("R packages:\n", file = requirements_file, append = TRUE)
+
+#write.table(installed_packages, file = requirements_file, append = TRUE, col.names = FALSE, row.names = FALSE, sep = " ")
+
+# Append sessionInfo to the requirements.txt file
+cat(session_info, file = requirements_file, append = TRUE, sep = "\n")
+
+cat("Requirements file created successfully:", requirements_file, "\n")
+
+```
